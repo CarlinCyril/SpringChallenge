@@ -1,7 +1,7 @@
 import sys
 import math
 from enum import Enum
-from typing import List, Union, Dict
+from typing import Union, Dict, Set
 
 
 def error(s: str):
@@ -18,11 +18,27 @@ class Position:
         self.x = x_coord
         self.y = y_coord
 
+    def distance(self, pos):
+        # Manhattan distance
+        return abs(self.x - pos.x) + abs(self.y - pos.y)
+
+    def get_position(self):
+        return self
+
     def __eq__(self, other):
         if isinstance(other, Position):
             return self.x == other.x and self.y == other.y
         else:
             return False
+
+    def __str__(self):
+        return f"{self.x} {self.y}"
+
+    def __repr__(self):
+        return f"{self.x} {self.y}"
+
+    def __hash__(self):
+        return hash((self.x, self.y))
 
 
 class Item:
@@ -59,20 +75,28 @@ class Pac(Item):
         self.speed_turns_left = speed_turns_left
         self.ability_cd = ability_cd
 
+    def __hash__(self):
+        return self.id.__hash__()
+
 
 class Pellet(Item):
     def __init__(self, position: Position, value_pellet: int) -> None:
         self.position = position
         self.value = value_pellet
 
+    def __str__(self):
+        return "Pellet {} with value {}".format(self.position, self.value)
+
 
 class Board:
     def __init__(self) -> None:
         self.width, self.height = [int(i) for i in input().split()]
+        error("W = {}\nH = {}".format(self.width, self.height))
         self.grid = dict()  # type: Dict[Position, Tile]
-        for i in range(height):
+        for j in range(self.height):
             row_input = input()
-            for j in range(width):
+            error(row_input)
+            for i in range(self.width):
                 if row_input[j] == TileType.FLOOR.value:
                     self.grid[Position(i, j)] = Tile(i, j, TileType.FLOOR)
                 elif row_input[j] == TileType.WALL.value:
@@ -80,15 +104,28 @@ class Board:
                 else:
                     raise ValueError("TileType {} is unknown".format(row_input[j]))
 
-    def set_occupant(self, position: Position, occupant: Item):
+    def set_occupant(self, position: Position, occupant: Item) -> None:
         self.grid[position].occupant = occupant
 
-    def reset_occupant(self, position: Position):
+    def reset_occupant(self, position: Position) -> None:
         self.grid[position].occupant = None
 
-    def reset_all_occupants(self):
+    def reset_all_occupants(self) -> None:
         for tile in self.grid.values():
             tile.occupant = None
+
+    def closest_pellet(self, position: Position) -> Pellet:
+        # Absolute primitive shortest path
+        min_distance = self.width * self.height
+        closest_pellet = None
+        for tile in self.grid.values():
+            if isinstance(tile.occupant, Pellet):
+                current_distance = position.distance(tile.get_position())
+                if current_distance < min_distance:
+                    min_distance = position.distance(tile.get_position())
+                    closest_pellet = tile.occupant
+        error("closest pellet is {}".format(closest_pellet))
+        return closest_pellet
 
 
 class Game:
@@ -96,8 +133,12 @@ class Game:
         self.board = Board()
         self.my_score = 0
         self.opponent_score = 0
+        self.my_pacs = set()  # type: Set[Pac]
+        self.enemy_pacs = set()  # type: Set[Pac]
+        self.target_moves = dict()  # type: Dict[Pac, Position]
 
     def update(self):
+        self.board.reset_all_occupants()
         self.my_score, self.opponent_score = [int(i) for i in input().split()]
         visible_pac_count = int(input())  # all your pacs and enemy pacs in sight
         for i in range(visible_pac_count):
@@ -116,55 +157,35 @@ class Game:
                 ability_cd=ability_cooldown
             )
             self.board.set_occupant(position, new_pac)
+            if mine:
+                self.my_pacs.add(new_pac)
+            else:
+                self.enemy_pacs.add(new_pac)
         visible_pellet_count = int(input())  # all pellets in sight
         for i in range(visible_pellet_count):
-            # value: amount of points this pellet is worth
             x, y, value = [int(j) for j in input().split()]
-            position = Position(int(x), int(y))
+            position = Position(x, y)
             new_pellet = Pellet(position, value)
             self.board.set_occupant(position, new_pellet)
+
+    def next_move(self):
+        for pac in self.my_pacs:
+            closest_pellet = self.board.closest_pellet(pac.position)
+            self.target_moves[pac] = closest_pellet.position \
+                if closest_pellet.position not in self.target_moves.values() else pac.position
+
+    def move(self):
+        for pac, target in self.target_moves.items():
+            print("MOVE {} {} {}".format(pac.id, target.x, target.y))
 
 
 class Bisous:
     pass
 
 
-# Grab the pellets as fast as you can!
+game = Game()
 
-# width: size of the grid
-# height: top left corner is (x=0, y=0)
-width, height = [int(i) for i in input().split()]
-for i in range(height):
-    row = input()  # one line of the grid: space " " is floor, pound "#" is wall
-
-# game loop
 while True:
-    my_score, opponent_score = [int(i) for i in input().split()]
-    visible_pac_count = int(input())  # all your pacs and enemy pacs in sight
-    for i in range(visible_pac_count):
-        # pac_id: pac number (unique within a team)
-        # mine: true if this pac is yours
-        # x: position in the grid
-        # y: position in the grid
-        # type_id: unused in wood leagues
-        # speed_turns_left: unused in wood leagues
-        # ability_cooldown: unused in wood leagues
-        pac_id, mine, x, y, type_id, speed_turns_left, ability_cooldown = input().split()
-        pac_id = int(pac_id)
-        mine = mine != "0"
-        x = int(x)
-        y = int(y)
-        speed_turns_left = int(speed_turns_left)
-        ability_cooldown = int(ability_cooldown)
-    visible_pellet_count = int(input())  # all pellets in sight
-    for i in range(visible_pellet_count):
-        # value: amount of points this pellet is worth
-        x, y, value = [int(j) for j in input().split()]
-
-    # Write an action using print
-    # To debug: print("Debug messages...", file=sys.stderr)
-
-    # MOVE <pacId> <x> <y>
-    print("MOVE 0 15 10")
-
-    # This is a test comment
+    game.update()
+    game.next_move()
+    game.move()
