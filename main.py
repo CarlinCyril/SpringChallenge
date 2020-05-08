@@ -125,6 +125,7 @@ class Board:
                     min_distance = position.distance(tile.get_position())
                     closest_pellet = tile.occupant
         error("closest pellet is {}".format(closest_pellet))
+        self.reset_occupant(closest_pellet.position)
         return closest_pellet
 
 
@@ -136,9 +137,10 @@ class Game:
         self.my_pacs = set()  # type: Set[Pac]
         self.enemy_pacs = set()  # type: Set[Pac]
         self.target_moves = dict()  # type: Dict[Pac, Position]
+        self.previous_positions = set()  # type: Set[Pac]
 
     def update(self):
-        self.board.reset_all_occupants()
+        self.reset()
         self.my_score, self.opponent_score = [int(i) for i in input().split()]
         visible_pac_count = int(input())  # all your pacs and enemy pacs in sight
         for i in range(visible_pac_count):
@@ -171,12 +173,19 @@ class Game:
     def next_move(self):
         for pac in self.my_pacs:
             closest_pellet = self.board.closest_pellet(pac.position)
-            self.target_moves[pac] = closest_pellet.position \
-                if closest_pellet.position not in self.target_moves.values() else pac.position
+            self.target_moves[pac] = closest_pellet.position
 
     def move(self):
-        for pac, target in self.target_moves.items():
-            print("MOVE {} {} {}".format(pac.id, target.x, target.y))
+        action_string = " | ".join(["MOVE {} {} {}"
+                                   .format(pac.id, target.x, target.y) for pac, target in self.target_moves.items()])
+        print(action_string)
+
+    def reset(self):
+        self.board.reset_all_occupants()
+        self.previous_positions = self.my_pacs.copy()
+        self.my_pacs.clear()
+        self.enemy_pacs.clear()
+        self.target_moves.clear()
 
 
 class Bisous:
