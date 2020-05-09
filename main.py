@@ -229,16 +229,18 @@ class Board:
     def distance(self, start: Tile, target: Tile, visited_tiles=None) -> int:
         if visited_tiles is None:
             visited_tiles = set()
+        if start == target:
+            return 1
+
         unvisited_tiles = (tile for tile in start.neighbors if tile not in visited_tiles)
+        visited_tiles.add(start)
+        min_distance = self.width * self.height
+
         if unvisited_tiles:
-            if target in unvisited_tiles:
-                min_distance = 0
-            else:
-                distances_neighbors = list(map(self.distance, unvisited_tiles))
-                min_distance = min(distances_neighbors)
-                next_tile = distances_neighbors.index(min_distance)
-        else:
-            min_distance = self.width * self.height
+            for neighbor in unvisited_tiles:
+                distance_neighbor = self.distance(neighbor, target, visited_tiles)
+                min_distance = distance_neighbor if distance_neighbor < min_distance else min_distance
+
         return 1 + min_distance
 
     # A* search
@@ -401,8 +403,12 @@ class Game:
                 self.target_moves[pac] = Speed(pac.id)
             else:
                 best_node = self.board.best_path(pac.position, (pac.speed_turns_left > 0) + 2)
-                self.target_moves[pac] = Move(pac.id, best_node.tile)
-                self.board.reset_occupant(best_node.tile.get_position())
+                if best_node.total_cost:
+                    self.target_moves[pac] = Move(pac.id, best_node.tile)
+                    self.board.reset_occupant(best_node.tile.get_position())
+                else:
+                    position = self.board.get_random_position()
+                    self.target_moves[pac] = Move(pac.id, position)
 
     def print_actions(self):
         action_string = " | ".join([action.print_action() for action in self.target_moves.values()])
