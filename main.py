@@ -116,13 +116,31 @@ class Tile(Position):
         super().__init__(x_coord, y_coord)
         self.neighbors = set()  # type: Set[Tile]
         self.type = tile_type
-        self.occupant = None  # type: Union[Item, None]
+        self.value = 1.1
+        self._occupant = None  # type: Union[Item, None]
 
     def __eq__(self, other):
         if isinstance(other, Tile):
             return super().__eq__(other) and other.type == self.type
         else:
             return False
+
+    def __repr__(self):
+        return f"{super().__repr__(): {self.value}}"
+
+    @property
+    def occupant(self):
+        return self._occupant
+
+    @occupant.setter
+    def occupant(self, occupant: Item):
+        if isinstance(occupant, Pac) or not occupant:
+            self.value = 0
+        elif isinstance(occupant, Pellet):
+            self.value = occupant.value
+        else:
+            raise ValueError("Unknown occupant type {}".format(type(occupant)))
+        self._occupant = occupant
 
     def __hash__(self):
         return super().__hash__()
@@ -334,8 +352,8 @@ class Board:
         if visited is None:
             visited = set()
         error("-------------------------------")
-        error(f"current position is {position}")
-        error(f"steps left = {max_distance}")
+        error(f"current position is {position}, with value {self.grid[position].value}")
+        # error(f"steps left = {max_distance}")
 
         current_tile = self.grid[position]
         neighbors = (tile for tile in current_tile.neighbors if tile not in visited)
@@ -349,11 +367,13 @@ class Board:
                 if max_score < node.total_cost:
                     max_score = node.total_cost
                     best_node = node
+            current_node = Node(self.grid[position], best_node)
+        else:
+            current_node = Node(self.grid[position], None)
 
-        if isinstance(current_tile.occupant, Pellet):
-            best_node.total_cost += current_tile.occupant.value
-        error(f"best node = {best_node}")
-        return best_node
+        current_node.total_cost = best_node.total_cost + current_tile.value
+        error(f"best node = {current_node}")
+        return current_node
 
     def in_sight(self, pac: Pac, enemy_pac: Pac) -> bool:
         if pac.position.x == enemy_pac.position.x:
@@ -427,8 +447,14 @@ class Game:
                 self.target_moves[pac] = Speed(pac.id)
             else:
                 best_node = self.board.best_path(pac.position, (pac.speed_turns_left > 0) + 2)
+                error(f"best node chosen = {best_node}")
                 if best_node.total_cost:
-                    self.target_moves[pac] = Move(pac.id, best_node.tile)
+                    node = best_node
+                    while node.parent:
+                        error(f"Deleting occupant of node {node}")
+                        self.board.reset_occupant(node.tile.get_position())
+                        node = node.parent
+                    self.target_moves[pac] = Move(pac.id, node.tile)
                     self.board.reset_occupant(best_node.tile.get_position())
                 else:
                     position = self.get_random_position(pac)
@@ -439,7 +465,7 @@ class Game:
         print(action_string)
 
     def reset(self):
-        self.board.reset_all_occupants()
+        # self.board.reset_all_occupants()
         self.previous_positions = {pac: pac.position for pac in self.my_pacs}
         self.previous_moves = self.target_moves.copy()
         self.my_pacs.clear()
@@ -454,31 +480,33 @@ class Game:
     def is_stuck(self, pac):
         if self.previous_positions:
             error(f"Previous positions: {self.previous_positions[pac]}")
-            error(f"Previous move: {self.previous_moves[pac]}")
-            return pac.position == self.previous_positions[pac] and self.previous_moves[pac] not in (SPEED, SWITCH)
+            error(f"Previous move: {self.previous_moves[pac].type}")
+            return pac.position == self.previous_positions[pac] and self.previous_moves[pac].type == MOVE
         else:
             return False
 
     def get_random_position(self, pac: Pac):
-        error("No pellet found, sending to a random position.")
         random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
-        while self.board.grid[random_position].type == TileType.WALL and self.optimal_dispatching(random_position, pac):
+        while self.board.grid[random_position].type == TileType.WALL \
+                and not self.optimal_dispatching(random_position, pac):
             random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
+        error(f"No pellet found, sending to a random position: {random_position}")
         return random_position
 
     def optimal_dispatching(self, new_position: Position, pac: Pac):
         width = self.board.width
         height = self.board.height
         my_copy_pacs = self.my_pacs.copy()
-        my_copy_pacs.discard(pac)
+        my_copy_pacs.remove(pac)
 
         avg_position = sum(pac.position for pac in my_copy_pacs)
         avg_position += new_position
         avg_position.x /= len(my_copy_pacs) + 1
         avg_position.y /= len(my_copy_pacs) + 1
+        error(f"Barycenter = {avg_position}")
 
-        is_x_centered = width / 2 - 15 * width / 100 <= avg_position.x <= width + 15 * width / 100
-        is_y_centered = height / 2 - 15 * height / 100 <= avg_position.y <= height + 15 * height / 100
+        is_x_centered = width / 2 - 15 * (width / 100) <= avg_position.x <= width + 15 * (width / 100)
+        is_y_centered = height / 2 - 15 * (height / 100) <= avg_position.y <= height + 15 * (height / 100)
         return is_x_centered and is_y_centered
 
 
