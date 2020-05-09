@@ -4,6 +4,9 @@ from enum import Enum
 from random import randrange
 from typing import Union, Dict, Set, Optional, List
 
+# Problematic seeds
+# seed=-1877397861809193220
+
 
 def error(s: str):
     print(s, file=sys.stderr)
@@ -307,27 +310,27 @@ class Board:
     def best_path(self, position: Position, max_distance: int = 1, visited=None) -> Node:
         if visited is None:
             visited = set()
+        error("-------------------------------")
         error(f"current position is {position}")
         error(f"steps left = {max_distance}")
+
         current_tile = self.grid[position]
         neighbors = (tile for tile in current_tile.neighbors if tile not in visited)
         visited.add(current_tile)
+        best_node = Node(self.grid[position], None)
+
         if max_distance and neighbors:
-            best_node = None
             max_score = -1
             for neighbor in neighbors:
                 node = self.best_path(neighbor.get_position(), max_distance - 1, visited)
                 if max_score < node.total_cost:
                     max_score = node.total_cost
                     best_node = node
-            if isinstance(current_tile.occupant, Pellet):
-                best_node.total_cost += current_tile.occupant.value
-            return best_node
-        else:
-            best_node = Node(self.grid[position], None)
-            if isinstance(self.grid[position].occupant, Pellet):
-                best_node.total_cost += self.grid[position].occupant.value
-            return best_node
+
+        if isinstance(current_tile.occupant, Pellet):
+            best_node.total_cost += current_tile.occupant.value
+        error(f"best node = {best_node}")
+        return best_node
 
     def get_random_position(self):
         error("No pellet found, sending to a random position.")
