@@ -4,8 +4,12 @@ from enum import Enum
 from random import randrange
 from typing import Union, Dict, Set, Optional, List
 
+
 # Problematic seeds
 # seed=-1877397861809193220
+MOVE = "MOVE"
+SPEED = "SPEED"
+SWITCH = "SWITCH"
 
 
 def error(s: str):
@@ -31,6 +35,7 @@ PAYOFF = {PacShape.ROCK: {PacShape.ROCK: 0, PacShape.PAPER: -1, PacShape.SCISSOR
 class Action:
     def __init__(self, pac_id: int) -> None:
         self.pac_id = pac_id
+        self.type = None
 
     def print_action(self) -> str:
         pass
@@ -41,7 +46,7 @@ class Position:
         self.x = x_coord
         self.y = y_coord
 
-    def distance(self, pos):
+    def manhattan_distance(self, pos):
         # Manhattan distance
         return abs(self.x - pos.x) + abs(self.y - pos.y)
 
@@ -63,6 +68,15 @@ class Position:
     def __hash__(self):
         return hash((self.x, self.y))
 
+    def __add__(self, other):
+        return Position(self.x + other.x, self.y + other.y)
+
+    def __radd__(self, other):
+        if other == 0:
+            return self
+        else:
+            return self.__add__(other)
+
 
 class Item:
     pass
@@ -71,6 +85,7 @@ class Item:
 class Move(Action):
     def __init__(self, pac_id: int, target: Position) -> None:
         super().__init__(pac_id)
+        self.type = MOVE
         self.target_position = target
 
     def print_action(self) -> str:
@@ -80,6 +95,7 @@ class Move(Action):
 class Switch(Action):
     def __init__(self, pac_id: int, shape: PacShape):
         super().__init__(pac_id)
+        self.type = SWITCH
         self.target_shape = shape
 
     def print_action(self):
@@ -88,6 +104,7 @@ class Switch(Action):
 
 class Speed(Action):
     def __init__(self, pac_id: int):
+        self.type = SPEED
         super().__init__(pac_id)
 
     def print_action(self):
@@ -157,9 +174,15 @@ class Pac(Item):
     def __hash__(self):
         return self.id.__hash__()
 
+    def __eq__(self, other):
+        return self.id == other.id
+
+    def __repr__(self):
+        return f"Pac {self.id} ({self.position})"
+
     def attack(self, close_enemy) -> Action:
         if PAYOFF[self.type][close_enemy.type] in (0, -1):
-            counter_shape = next(shape for shape in PacShape if PAYOFF[self.type][shape] == 1)
+            counter_shape = next(shape for shape in PacShape if PAYOFF[shape][close_enemy.type] == 1)
             return Switch(self.id, counter_shape)
         else:
             return Move(self.id, close_enemy.position)
@@ -219,7 +242,7 @@ class Board:
                 best_target_node = self.best_path(position, min_distance + 1)
                 current_distance = best_target_node.total_cost
                 if min_distance <= current_distance < min_distance:
-                    min_distance = position.distance(tile.get_position())
+                    min_distance = position.manhattan_distance(tile.get_position())
                     closest_pellet = tile.occupant
         error("closest pellet is {}".format(closest_pellet))
         if closest_pellet:
@@ -295,10 +318,8 @@ class Board:
                     continue
 
                 # Generate heuristics (Manhattan distance)
-                neighbor.start_distance = abs(neighbor.tile.x - start_node.tile.x) + abs(
-                    neighbor.tile.y - start_node.tile.y)
-                neighbor.target_distance = abs(neighbor.tile.x - goal_node.tile.x) + abs(
-                    neighbor.tile.y - goal_node.tile.y)
+                neighbor.start_distance = neighbor.tile.manhattan_distance(start)
+                neighbor.target_distance = neighbor.tile.manhattan_distance(end)
                 neighbor.total_cost = neighbor.start_distance + neighbor.target_distance
 
                 # Check if neighbor is in open list and if it has a lower f value
@@ -334,20 +355,17 @@ class Board:
         error(f"best node = {best_node}")
         return best_node
 
-    def get_random_position(self):
-        error("No pellet found, sending to a random position.")
-        random_position = Position(randrange(0, self.width), randrange(0, self.height))
-        while self.grid[random_position].type == TileType.WALL:
-            random_position = Position(randrange(0, self.width), randrange(0, self.height))
-        return random_position
-
     def in_sight(self, pac: Pac, enemy_pac: Pac) -> bool:
         if pac.position.x == enemy_pac.position.x:
-            return abs(pac.position.y - enemy_pac.position.y) == \
-                   self.distance(self.grid[pac.position], self.grid[enemy_pac.position])
+            for y in range(pac.position.y, enemy_pac.position.y):
+                if self.grid[Position(pac.position.x, y)].type == TileType.WALL:
+                    return False
+            return True
         elif pac.position.y == enemy_pac.position.y:
-            return abs(pac.position.x - enemy_pac.position.x) == \
-                   self.distance(self.grid[pac.position], self.grid[enemy_pac.position])
+            for x in range(pac.position.x, enemy_pac.position.x):
+                if self.grid[Position(x, pac.position.y)].type == TileType.WALL:
+                    return False
+            return True
         else:
             return False
 
@@ -360,7 +378,8 @@ class Game:
         self.my_pacs = set()  # type: Set[Pac]
         self.enemy_pacs = set()  # type: Set[Pac]
         self.target_moves = dict()  # type: Dict[Pac, Action]
-        self.previous_positions = set()  # type: Set[Pac]
+        self.previous_positions = dict()  # type: Dict[Pac, Position]
+        self.previous_moves = dict()  # type: Dict[Pac, Action]
 
     def update(self):
         self.reset()
@@ -398,7 +417,12 @@ class Game:
         for pac in self.my_pacs:
             close_enemy = self.enemy_in_sight(pac)
             if close_enemy and pac.ability_cd == 0:
+                error(f"Enemy in sight : {close_enemy}")
                 self.target_moves[pac] = pac.attack(close_enemy)
+            elif self.is_stuck(pac):
+                error(f"{pac} is stuck")
+                position = self.get_random_position(pac)
+                self.target_moves[pac] = Move(pac.id, position)
             elif pac.ability_cd == 0:
                 self.target_moves[pac] = Speed(pac.id)
             else:
@@ -407,7 +431,7 @@ class Game:
                     self.target_moves[pac] = Move(pac.id, best_node.tile)
                     self.board.reset_occupant(best_node.tile.get_position())
                 else:
-                    position = self.board.get_random_position()
+                    position = self.get_random_position(pac)
                     self.target_moves[pac] = Move(pac.id, position)
 
     def print_actions(self):
@@ -416,7 +440,8 @@ class Game:
 
     def reset(self):
         self.board.reset_all_occupants()
-        self.previous_positions = self.my_pacs.copy()
+        self.previous_positions = {pac: pac.position for pac in self.my_pacs}
+        self.previous_moves = self.target_moves.copy()
         self.my_pacs.clear()
         self.enemy_pacs.clear()
         self.target_moves.clear()
@@ -425,6 +450,36 @@ class Game:
         for enemy_pac in self.enemy_pacs:
             if self.board.in_sight(pac, enemy_pac):
                 return enemy_pac
+
+    def is_stuck(self, pac):
+        if self.previous_positions:
+            error(f"Previous positions: {self.previous_positions[pac]}")
+            error(f"Previous move: {self.previous_moves[pac]}")
+            return pac.position == self.previous_positions[pac] and self.previous_moves[pac] not in (SPEED, SWITCH)
+        else:
+            return False
+
+    def get_random_position(self, pac: Pac):
+        error("No pellet found, sending to a random position.")
+        random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
+        while self.board.grid[random_position].type == TileType.WALL and self.optimal_dispatching(random_position, pac):
+            random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
+        return random_position
+
+    def optimal_dispatching(self, new_position: Position, pac: Pac):
+        width = self.board.width
+        height = self.board.height
+        my_copy_pacs = self.my_pacs.copy()
+        my_copy_pacs.discard(pac)
+
+        avg_position = sum(pac.position for pac in my_copy_pacs)
+        avg_position += new_position
+        avg_position.x /= len(my_copy_pacs) + 1
+        avg_position.y /= len(my_copy_pacs) + 1
+
+        is_x_centered = width / 2 - 15 * width / 100 <= avg_position.x <= width + 15 * width / 100
+        is_y_centered = height / 2 - 15 * height / 100 <= avg_position.y <= height + 15 * height / 100
+        return is_x_centered and is_y_centered
 
 
 class Bisous:
