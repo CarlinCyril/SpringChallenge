@@ -184,7 +184,7 @@ class Board:
             row_input = input()
             error(row_input)
             for i in range(self.width):
-                self.grid[Position(i, j)] = Tile(i, j, TileType(row_input[j]))
+                self.grid[Position(i, j)] = Tile(i, j, TileType(row_input[i]))
 
     def _init_neighbors(self):
         for position, tile in self.grid.items():
@@ -226,7 +226,7 @@ class Board:
     def distance(self, start: Tile, target: Tile, visited_tiles=None) -> int:
         if visited_tiles is None:
             visited_tiles = set()
-        unvisited_tiles = list(start.neighbors.intersection(visited_tiles))
+        unvisited_tiles = (tile for tile in start.neighbors if tile not in visited_tiles)
         if unvisited_tiles:
             if target in unvisited_tiles:
                 min_distance = 0
@@ -304,17 +304,19 @@ class Board:
         # Return None, no path is found
         return None
 
-    def best_path(self, position: Position, max_distance: int = 1) -> Node:
+    def best_path(self, position: Position, max_distance: int = 1, visited=None) -> Node:
+        if visited is None:
+            visited = set()
         error(f"current position is {position}")
-        error(f"grid = {self.grid[Position(29,7)]}")
-        error(f"position is a {type(position)}")
+        error(f"steps left = {max_distance}")
         current_tile = self.grid[position]
-        if max_distance:
+        neighbors = (tile for tile in current_tile.neighbors if tile not in visited)
+        visited.add(current_tile)
+        if max_distance and neighbors:
             best_node = None
             max_score = -1
-            neighbors = current_tile.neighbors
             for neighbor in neighbors:
-                node = self.best_path(neighbor.get_position(), max_distance - 1)
+                node = self.best_path(neighbor.get_position(), max_distance - 1, visited)
                 if max_score < node.total_cost:
                     max_score = node.total_cost
                     best_node = node
@@ -392,20 +394,19 @@ class Game:
             close_enemy = self.enemy_in_sight(pac)
             if close_enemy and pac.ability_cd == 0:
                 self.target_moves[pac] = pac.attack(close_enemy)
-                continue
-            if pac.ability_cd == 0:
+            elif pac.ability_cd == 0:
                 self.target_moves[pac] = Speed(pac.id)
-                continue
-            best_node = self.board.best_path(pac.position, pac.speed_turns_left > 0 + 2)
-            self.target_moves[pac] = Move(pac.id, best_node.tile.get_position())
-
+            else:
+                best_node = self.board.best_path(pac.position, (pac.speed_turns_left > 0) + 2)
+                self.target_moves[pac] = Move(pac.id, best_node.tile)
+                self.board.reset_occupant(best_node.tile.get_position())
 
     def print_actions(self):
         action_string = " | ".join([action.print_action() for action in self.target_moves.values()])
         print(action_string)
 
     def reset(self):
-        # self.board.reset_all_occupants()
+        self.board.reset_all_occupants()
         self.previous_positions = self.my_pacs.copy()
         self.my_pacs.clear()
         self.enemy_pacs.clear()
