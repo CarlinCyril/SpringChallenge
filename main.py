@@ -1,12 +1,12 @@
 import sys
-import math
 from enum import Enum
 from random import randrange
 from typing import Union, Dict, Set, Optional, List
 
 
-# Problematic seeds
-# seed=-1877397861809193220
+WIDTH = 0
+HEIGHT = 0
+
 MOVE = "MOVE"
 SPEED = "SPEED"
 SWITCH = "SWITCH"
@@ -78,14 +78,28 @@ class Position:
             return self.__add__(other)
 
 
+class Grid(dict):
+    def __getitem__(self, item):
+        if item.x >= WIDTH and super().__getitem__(Position(WIDTH - 1, item.y)).type == TileType.FLOOR:
+            error(f"Found a tunnel for {item}")
+            return super().__getitem__(Position(item.x % WIDTH, item.y))
+        else:
+            return super().__getitem__(item)
+
+    def get(self, item, default_value=None):
+        if item.x >= WIDTH and super().__getitem__(Position(WIDTH - 1, item.y)).type == TileType.FLOOR:
+            error(f"Found a tunnel for {item}")
+            return super().get(Position(item.x % WIDTH, item.y), default_value)
+        else:
+            return super().get(item, default_value)
+
+
 ADJACENCY = (Position(1, 0), Position(0, -1), Position(-1, 0), Position(0, 1))
 
 
 class Item:
     def __init__(self, position):
         self.position = position
-
-    pass
 
 
 class Move(Action):
@@ -124,6 +138,7 @@ class Tile(Position):
         self.type = tile_type
         self.value = 0.9
         self._occupant = None  # type: Union[Item, None]
+        self.visited = False
 
     def __eq__(self, other):
         if isinstance(other, Tile):
@@ -231,8 +246,12 @@ class Pellet(Item):
 class Board:
     def __init__(self) -> None:
         self.width, self.height = [int(i) for i in input().split()]
+        global WIDTH
+        global HEIGHT
+        WIDTH = self.width
+        HEIGHT = self.height
         error("W = {}\nH = {}".format(self.width, self.height))
-        self.grid = dict()  # type: Dict[Position, Tile]
+        self.grid = Grid()  # type: Grid[Position, Tile]
         self._init_grid()
         self._init_neighbors()
 
@@ -358,18 +377,18 @@ class Board:
             current_node = nodes_to_visit.pop(0)
             nodes_visited.append(current_node)
 
-            # error("------------------------------")
-            # error(f"Current node = {current_node}")
+            error("------------------------------")
+            error(f"Current node = {current_node}")
 
             neighbors = current_node.tile.neighbors
-            # error(f"Neighbors = {neighbors}")
+            error(f"Neighbors = {neighbors}")
 
             for neighbor in neighbors:
                 new_node = Node(neighbor, current_node)
 
                 new_node.total_cost = neighbor.value + current_node.total_cost
 
-                if new_node.path_length() <= max_distance:
+                if new_node.path_length() <= max_distance and not isinstance(neighbor.occupant, Pacman):
                     if new_node not in nodes_visited:
                         nodes_to_visit.append(new_node)
                     else:
@@ -384,18 +403,16 @@ class Board:
         return best_node
 
     def in_sight(self, pac: Pacman, enemy_pac: Pacman) -> bool:
-        if pac.position.x == enemy_pac.position.x:
-            for y in range(pac.position.y, enemy_pac.position.y):
-                if self.grid[Position(pac.position.x, y)].type == TileType.WALL:
-                    return False
-            return True
-        elif pac.position.y == enemy_pac.position.y:
-            for x in range(pac.position.x, enemy_pac.position.x):
-                if self.grid[Position(x, pac.position.y)].type == TileType.WALL:
-                    return False
-            return True
-        else:
-            return False
+        for unit_move in ADJACENCY:
+            current_position = pac.position + unit_move
+            current_tile = self.grid.get(current_position, Tile(0, 0, TileType.WALL))
+            while current_tile.type == TileType.FLOOR and current_position.x < self.width:
+                error(f"Current tile in sight = {current_tile}")
+                if current_tile.occupant and current_tile.occupant == enemy_pac:
+                    return True
+                current_position += unit_move
+                current_tile = self.grid.get(current_position, Tile(0, 0, TileType.WALL))
+        return False
 
 
 class Game:
@@ -452,13 +469,14 @@ class Game:
         # error(f"Pellets being updated {self.known_pellet.keys()}")
         for known_position in visible_pellets.difference(self.known_pellet.keys()):
             # error(f"Deleting pellet at tile {self.board.grid[known_position]}")
-            self.board.reset_occupant(known_position)
+            if isinstance(self.board.grid[known_position].occupant, Pellet):
+                self.board.reset_occupant(known_position)
 
     def next_move(self):
         for pac in self.my_pacs:
             close_enemy = self.enemy_in_sight(pac)
             if close_enemy and pac.ability_cd == 0:
-                error(f"Enemy in sight : {close_enemy}")
+                error(f"Enemy in sight : {close_enemy} for pacman {pac}")
                 self.target_moves[pac] = pac.attack(close_enemy)
             elif self.is_stuck(pac):
                 error(f"{pac} is stuck")
@@ -506,9 +524,13 @@ class Game:
         self.known_pellet.clear()
 
     def enemy_in_sight(self, pac: Pacman) -> Union[None, Pacman]:
+        enemies_in_sight = list()
         for enemy_pac in self.enemy_pacs:
             if self.board.in_sight(pac, enemy_pac):
-                return enemy_pac
+                enemies_in_sight.append(enemy_pac)
+        if enemies_in_sight:
+            enemies_in_sight.sort(key=lambda enemy: enemy.position.manhattan_distance(pac.position))
+            return enemies_in_sight[0]
 
     def is_stuck(self, pac) -> bool:
         if self.previous_positions:
@@ -548,7 +570,7 @@ class Game:
             for unit_move in ADJACENCY:
                 current_position = pac.position + unit_move
                 current_tile = self.board.grid.get(current_position, Tile(0, 0, TileType.WALL))
-                while current_tile.type == TileType.FLOOR:
+                while current_tile.type == TileType.FLOOR and current_position.x < self.board.width:
                     # error(f"Current position = {current_tile}")
                     set_visible_pellets.add(current_position)
                     current_position += unit_move
@@ -560,7 +582,7 @@ class Game:
         if not self.known_pellet:
             return
         optimal_pellets = [pellet for position, pellet in self.known_pellet.items()
-                              if self.optimal_dispatching(position, pac)]
+                           if self.optimal_dispatching(position, pac)]
         if optimal_pellets:
             optimal_pellets.sort(reverse=True)
             return optimal_pellets[0]
