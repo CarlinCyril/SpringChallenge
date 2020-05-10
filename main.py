@@ -215,17 +215,40 @@ class Pacman(Item):
         return self.id.__hash__()
 
     def __eq__(self, other):
-        return self.id == other.id
+        return self.id == other.id and self.owned == other.owned
 
     def __repr__(self):
         return f"Pac {self.id} ({self.position})"
 
     def attack(self, close_enemy) -> Action:
         if PAYOFF[self.type][close_enemy.type] in (0, -1):
-            counter_shape = next(shape for shape in PacShape if PAYOFF[shape][close_enemy.type] == 1)
-            return Switch(self.id, counter_shape)
+            if self.ability_cd:
+                error("I have nothing to do but run away")
+                return self.runaway(close_enemy)
+            else:
+                if close_enemy.ability_cd:
+                    error("Lets change shape for battle")
+                    counter_shape = next(shape for shape in PacShape if PAYOFF[shape][close_enemy.type] == 1)
+                    return Switch(self.id, counter_shape)
+                else:
+                    error("Preventive run")
+                    return self.runaway(close_enemy)
         else:
-            return Move(self.id, close_enemy.position)
+            if close_enemy.ability_cd:
+                error("We can attack")
+                return Move(self.id, close_enemy.position)
+            else:
+                error("Running away just in case")
+                return self.runaway(close_enemy)
+
+    def runaway(self, close_enemy) -> Action:
+        global WIDTH
+        global HEIGHT
+        retreat_position = Position(
+                (2 * self.position.x - close_enemy.position.x) % WIDTH,
+                (2 * self.position.y - close_enemy.position.y) % HEIGHT
+            )
+        return Move(self.id, retreat_position)
 
 
 class Pellet(Item):
@@ -403,12 +426,14 @@ class Board:
         return best_node
 
     def in_sight(self, pac: Pacman, enemy_pac: Pacman) -> bool:
+        # error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+        # error(f"Check enemy pac {enemy_pac}")
         for unit_move in ADJACENCY:
             current_position = pac.position + unit_move
             current_tile = self.grid.get(current_position, Tile(0, 0, TileType.WALL))
             while current_tile.type == TileType.FLOOR and current_position.x < self.width:
-                error(f"Current tile in sight = {current_tile}")
-                if current_tile.occupant and current_tile.occupant == enemy_pac:
+                # error(f"Current tile in sight for pac {pac} = {current_tile}")
+                if isinstance(current_tile.occupant, Pacman) and current_tile.occupant == enemy_pac:
                     return True
                 current_position += unit_move
                 current_tile = self.grid.get(current_position, Tile(0, 0, TileType.WALL))
@@ -469,13 +494,13 @@ class Game:
         # error(f"Pellets being updated {self.known_pellet.keys()}")
         for known_position in visible_pellets.difference(self.known_pellet.keys()):
             # error(f"Deleting pellet at tile {self.board.grid[known_position]}")
-            if isinstance(self.board.grid[known_position].occupant, Pellet):
+            if not isinstance(self.board.grid[known_position].occupant, Pacman):
                 self.board.reset_occupant(known_position)
 
     def next_move(self):
         for pac in self.my_pacs:
             close_enemy = self.enemy_in_sight(pac)
-            if close_enemy and pac.ability_cd == 0:
+            if close_enemy:
                 error(f"Enemy in sight : {close_enemy} for pacman {pac}")
                 self.target_moves[pac] = pac.attack(close_enemy)
             elif self.is_stuck(pac):
@@ -528,9 +553,13 @@ class Game:
         for enemy_pac in self.enemy_pacs:
             if self.board.in_sight(pac, enemy_pac):
                 enemies_in_sight.append(enemy_pac)
+                error(f"Enemies in sight for pacman {pac}: {enemies_in_sight}")
+        error(f"Enemies in sight for pacman {pac}: {enemies_in_sight}")
         if enemies_in_sight:
             enemies_in_sight.sort(key=lambda enemy: enemy.position.manhattan_distance(pac.position))
-            return enemies_in_sight[0]
+            closest_enemy = enemies_in_sight[0]
+            if closest_enemy.position.manhattan_distance(pac.position) < 4:
+                return closest_enemy
 
     def is_stuck(self, pac) -> bool:
         if self.previous_positions:
