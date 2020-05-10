@@ -221,6 +221,12 @@ class Pellet(Item):
     def __str__(self):
         return "Pellet {} with value {}".format(self.position, self.value)
 
+    def __eq__(self, other):
+        return self.position == other.position
+
+    def __lt__(self, other):
+        return self.value < other.value
+
 
 class Board:
     def __init__(self) -> None:
@@ -253,22 +259,6 @@ class Board:
     def reset_all_occupants(self) -> None:
         for tile in self.grid.values():
             tile.occupant = None
-
-    def closest_pellet(self, position: Position, min_distance: int = 1) -> Pellet:
-        min_distance = self.width * self.height
-        closest_pellet = None
-        for tile in self.grid.values():
-            if isinstance(tile.occupant, Pellet):
-                # current_distance = position.distance(tile.get_position())
-                best_target_node = self.best_path(position, min_distance + 1)
-                current_distance = best_target_node.total_cost
-                if min_distance <= current_distance < min_distance:
-                    min_distance = position.manhattan_distance(tile.get_position())
-                    closest_pellet = tile.occupant
-        error("closest pellet is {}".format(closest_pellet))
-        if closest_pellet:
-            self.reset_occupant(closest_pellet.position)
-        return closest_pellet
 
     def distance(self, start: Tile, target: Tile, visited_tiles=None) -> int:
         if visited_tiles is None:
@@ -368,11 +358,11 @@ class Board:
             current_node = nodes_to_visit.pop(0)
             nodes_visited.append(current_node)
 
-            error("------------------------------")
-            error(f"Current node = {current_node}")
+            # error("------------------------------")
+            # error(f"Current node = {current_node}")
 
             neighbors = current_node.tile.neighbors
-            error(f"Neighbors = {neighbors}")
+            # error(f"Neighbors = {neighbors}")
 
             for neighbor in neighbors:
                 new_node = Node(neighbor, current_node)
@@ -459,9 +449,9 @@ class Game:
             new_pellet = Pellet(position, value)
             self.known_pellet[position] = new_pellet
             self.board.set_occupant(position, new_pellet)
-        error(f"Pellets being updated {self.known_pellet.keys()}")
+        # error(f"Pellets being updated {self.known_pellet.keys()}")
         for known_position in visible_pellets.difference(self.known_pellet.keys()):
-            error(f"Deleting pellet at tile {self.board.grid[known_position]}")
+            # error(f"Deleting pellet at tile {self.board.grid[known_position]}")
             self.board.reset_occupant(known_position)
 
     def next_move(self):
@@ -477,7 +467,9 @@ class Game:
             elif pac.ability_cd == 0:
                 self.target_moves[pac] = Speed(pac.id)
             else:
-                previous_path = self.board.astar_search(self.board.grid[pac.position], self.board.grid[self.previous_positions[pac]])
+                previous_path = self.board.astar_search(
+                    self.board.grid[pac.position], self.board.grid[self.previous_positions[pac]]
+                )
                 best_node = self.board.best_path(
                     pac.position,
                     (pac.speed_turns_left > 0) + 3,
@@ -487,13 +479,18 @@ class Game:
                 if best_node and best_node.total_cost:
                     node = best_node
                     while node.parent:
-                        error(f"Deleting occupant of node {node}")
+                        # error(f"Deleting occupant of node {node}")
                         self.board.reset_occupant(node.tile.get_position())
                         node = node.parent
                     self.target_moves[pac] = Move(pac.id, best_node.tile)
                 else:
-                    position = self.get_random_position(pac)
-                    self.target_moves[pac] = Move(pac.id, position)
+                    best_pellet = self.best_closest_pellet(pac)
+                    if best_pellet:
+                        error(f"Found a known pellet : {best_pellet}")
+                        self.target_moves[pac] = Move(pac.id, best_pellet.position)
+                    else:
+                        position = self.get_random_position(pac)
+                        self.target_moves[pac] = Move(pac.id, position)
 
     def print_actions(self):
         action_string = " | ".join([action.print_action() for action in self.target_moves.values()])
@@ -515,8 +512,8 @@ class Game:
 
     def is_stuck(self, pac) -> bool:
         if self.previous_positions:
-            error(f"Previous positions: {self.previous_positions[pac]}")
-            error(f"Previous move: {self.previous_moves[pac].type}")
+            # error(f"Previous positions: {self.previous_positions[pac]}")
+            # error(f"Previous move: {self.previous_moves[pac].type}")
             return pac.position == self.previous_positions[pac] and self.previous_moves[pac].type == MOVE
         else:
             return False
@@ -539,7 +536,7 @@ class Game:
         avg_position += new_position
         avg_position.x /= len(my_copy_pacs) + 1
         avg_position.y /= len(my_copy_pacs) + 1
-        error(f"Barycenter = {avg_position}")
+        # error(f"Barycenter = {avg_position}")
 
         is_x_centered = width / 2 - 15 * (width / 100) <= avg_position.x <= width + 15 * (width / 100)
         is_y_centered = height / 2 - 15 * (height / 100) <= avg_position.y <= height + 15 * (height / 100)
@@ -552,12 +549,27 @@ class Game:
                 current_position = pac.position + unit_move
                 current_tile = self.board.grid.get(current_position, Tile(0, 0, TileType.WALL))
                 while current_tile.type == TileType.FLOOR:
-                    error(f"Current position = {current_tile}")
+                    # error(f"Current position = {current_tile}")
                     set_visible_pellets.add(current_position)
                     current_position += unit_move
                     current_tile = self.board.grid.get(current_position, Tile(0, 0, TileType.WALL))
-        error(f"Visible pellets = {set_visible_pellets}")
+        # error(f"Visible pellets = {set_visible_pellets}")
         return set_visible_pellets
+
+    def best_closest_pellet(self, pac: Pacman) -> Optional[Pellet]:
+        if not self.known_pellet:
+            return
+        optimal_pellets = [pellet for position, pellet in self.known_pellet.items()
+                              if self.optimal_dispatching(position, pac)]
+        if optimal_pellets:
+            optimal_pellets.sort(reverse=True)
+            return optimal_pellets[0]
+        else:
+            list_pellet_positions = list(self.known_pellet.keys())
+            list_pellet_positions.sort(
+                key=lambda pos: pos.manhattan_distance(pac.position)
+            )
+            return self.known_pellet[list_pellet_positions[0]]
 
 
 class Bisous:
