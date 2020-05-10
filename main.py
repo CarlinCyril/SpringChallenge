@@ -78,7 +78,13 @@ class Position:
             return self.__add__(other)
 
 
+ADJACENCY = (Position(1, 0), Position(0, -1), Position(-1, 0), Position(0, 1))
+
+
 class Item:
+    def __init__(self, position):
+        self.position = position
+
     pass
 
 
@@ -89,7 +95,7 @@ class Move(Action):
         self.target_position = target
 
     def print_action(self) -> str:
-        return "MOVE {} {} {}".format(self.pac_id, self.target_position.x, self.target_position.y)
+        return "MOVE {} {} {}".format(self.pac_id, int(self.target_position.x), int(self.target_position.y))
 
 
 class Switch(Action):
@@ -116,7 +122,7 @@ class Tile(Position):
         super().__init__(x_coord, y_coord)
         self.neighbors = set()  # type: Set[Tile]
         self.type = tile_type
-        self.value = 1.1
+        self.value = 0.9
         self._occupant = None  # type: Union[Item, None]
 
     def __eq__(self, other):
@@ -126,7 +132,7 @@ class Tile(Position):
             return False
 
     def __repr__(self):
-        return f"{super().__repr__(): {self.value}}"
+        return f"{super().__repr__()}: {self.value}"
 
     @property
     def occupant(self):
@@ -134,7 +140,7 @@ class Tile(Position):
 
     @occupant.setter
     def occupant(self, occupant: Item):
-        if isinstance(occupant, Pac) or not occupant:
+        if isinstance(occupant, Pacman) or not occupant:
             self.value = 0
         elif isinstance(occupant, Pellet):
             self.value = occupant.value
@@ -171,19 +177,20 @@ class Node:
     def __repr__(self):
         return '({0},{1})'.format(self.tile, self.total_cost)
 
+    def path_length(self) -> int:
+        path_length = 0
+        node = self
+        while node.parent:
+            node = node.parent
+            path_length += 1
+        return path_length
 
-class Pac(Item):
-    def __init__(
-            self,
-            position: Position,
-            pac_type: PacShape,
-            owned: bool,
-            pac_id: int,
-            speed_turns_left: int,
-            ability_cd: int
-    ) -> None:
+
+class Pacman(Item):
+    def __init__(self, position: Position, pac_type: PacShape, owned: bool, pac_id: int, speed_turns_left: int,
+                 ability_cd: int) -> None:
+        super().__init__(position)
         self.id = pac_id
-        self.position = position
         self.owned = owned
         self.type = pac_type
         self.speed_turns_left = speed_turns_left
@@ -208,7 +215,7 @@ class Pac(Item):
 
 class Pellet(Item):
     def __init__(self, position: Position, value_pellet: int) -> None:
-        self.position = position
+        super().__init__(position)
         self.value = value_pellet
 
     def __str__(self):
@@ -232,12 +239,8 @@ class Board:
 
     def _init_neighbors(self):
         for position, tile in self.grid.items():
-            for i in (1, -1):
-                sentinel = self.grid.get(Position(position.x + i, position.y), Tile(0, 0, TileType.WALL))
-                if sentinel.type == TileType.FLOOR:
-                    tile.neighbors.add(sentinel)
-            for i in (1, -1):
-                sentinel = self.grid.get(Position(position.x, position.y + i), Tile(0, 0, TileType.WALL))
+            for adjacent_position in ADJACENCY:
+                sentinel = self.grid.get(position + adjacent_position, Tile(0, 0, TileType.WALL))
                 if sentinel.type == TileType.FLOOR:
                     tile.neighbors.add(sentinel)
 
@@ -285,7 +288,7 @@ class Board:
         return 1 + min_distance
 
     # A* search
-    def astar_search(self, start, end) -> Optional[List[Tile]]:
+    def astar_search(self, start: Tile, end: Tile) -> Optional[List[Tile]]:
         # Create lists for open nodes and closed nodes
         nodes_to_visit = []  # type: List[Node]
         visited_nodes = []  # type: List[Node]
@@ -348,34 +351,49 @@ class Board:
         # Return None, no path is found
         return None
 
-    def best_path(self, position: Position, max_distance: int = 1, visited=None) -> Node:
-        if visited is None:
-            visited = set()
-        error("-------------------------------")
-        error(f"current position is {position}, with value {self.grid[position].value}")
-        # error(f"steps left = {max_distance}")
+    def best_path(self, start: Position, max_distance: int = 1, visited=None) -> Node:
+        nodes_to_visit = list()  # type: List[Node]
+        nodes_visited = list()  # type: List[Node]
 
-        current_tile = self.grid[position]
-        neighbors = (tile for tile in current_tile.neighbors if tile not in visited)
-        visited.add(current_tile)
-        best_node = Node(self.grid[position], None)
+        if visited:
+            for visited_tile in visited:
+                nodes_visited.append(Node(visited_tile, None))
 
-        if max_distance and neighbors:
-            max_score = -1
+        start_node = Node(self.grid[start], None)
+
+        nodes_to_visit.append(start_node)
+
+        while nodes_to_visit:
+            nodes_to_visit.sort()
+            current_node = nodes_to_visit.pop(0)
+            nodes_visited.append(current_node)
+
+            error("------------------------------")
+            error(f"Current node = {current_node}")
+
+            neighbors = current_node.tile.neighbors
+            error(f"Neighbors = {neighbors}")
+
             for neighbor in neighbors:
-                node = self.best_path(neighbor.get_position(), max_distance - 1, visited)
-                if max_score < node.total_cost:
-                    max_score = node.total_cost
-                    best_node = node
-            current_node = Node(self.grid[position], best_node)
+                new_node = Node(neighbor, current_node)
+
+                new_node.total_cost = neighbor.value + current_node.total_cost
+
+                if new_node.path_length() <= max_distance:
+                    if new_node not in nodes_visited:
+                        nodes_to_visit.append(new_node)
+                    else:
+                        error(f"Node {new_node} being discarded")
+
+        potential_nodes = [node for node in nodes_visited if node.path_length() > 0]
+        potential_nodes.sort(reverse=True)
+        if potential_nodes:
+            best_node = potential_nodes[0]
         else:
-            current_node = Node(self.grid[position], None)
+            best_node = start_node
+        return best_node
 
-        current_node.total_cost = best_node.total_cost + current_tile.value
-        error(f"best node = {current_node}")
-        return current_node
-
-    def in_sight(self, pac: Pac, enemy_pac: Pac) -> bool:
+    def in_sight(self, pac: Pacman, enemy_pac: Pacman) -> bool:
         if pac.position.x == enemy_pac.position.x:
             for y in range(pac.position.y, enemy_pac.position.y):
                 if self.grid[Position(pac.position.x, y)].type == TileType.WALL:
@@ -395,15 +413,20 @@ class Game:
         self.board = Board()
         self.my_score = 0
         self.opponent_score = 0
-        self.my_pacs = set()  # type: Set[Pac]
-        self.enemy_pacs = set()  # type: Set[Pac]
-        self.target_moves = dict()  # type: Dict[Pac, Action]
-        self.previous_positions = dict()  # type: Dict[Pac, Position]
-        self.previous_moves = dict()  # type: Dict[Pac, Action]
+        self.my_pacs = set()  # type: Set[Pacman]
+        self.known_pellet = dict()  # type: Dict[Position, Pellet]
+        self.enemy_pacs = set()  # type: Set[Pacman]
+        self.target_moves = dict()  # type: Dict[Pacman, Action]
+        self.previous_positions = dict()  # type: Dict[Pacman, Position]
+        self.previous_moves = dict()  # type: Dict[Pacman, Action]
 
     def update(self):
         self.reset()
         self.my_score, self.opponent_score = [int(i) for i in input().split()]
+        self.update_pacmen()
+        self.update_pellets()
+
+    def update_pacmen(self) -> None:
         visible_pac_count = int(input())  # all your pacs and enemy pacs in sight
         for i in range(visible_pac_count):
             pac_id, mine, x, y, type_id, speed_turns_left, ability_cooldown = input().split()
@@ -413,7 +436,7 @@ class Game:
             position = Position(int(x), int(y))
             speed_turns_left = int(speed_turns_left)
             ability_cooldown = int(ability_cooldown)
-            new_pac = Pac(
+            new_pac = Pacman(
                 position=position,
                 pac_type=pac_type,
                 pac_id=pac_id,
@@ -426,12 +449,20 @@ class Game:
                 self.my_pacs.add(new_pac)
             else:
                 self.enemy_pacs.add(new_pac)
+
+    def update_pellets(self) -> None:
         visible_pellet_count = int(input())  # all pellets in sight
+        visible_pellets = self.visible_pellets()
         for i in range(visible_pellet_count):
             x, y, value = [int(j) for j in input().split()]
             position = Position(x, y)
             new_pellet = Pellet(position, value)
+            self.known_pellet[position] = new_pellet
             self.board.set_occupant(position, new_pellet)
+        error(f"Pellets being updated {self.known_pellet.keys()}")
+        for known_position in visible_pellets.difference(self.known_pellet.keys()):
+            error(f"Deleting pellet at tile {self.board.grid[known_position]}")
+            self.board.reset_occupant(known_position)
 
     def next_move(self):
         for pac in self.my_pacs:
@@ -446,16 +477,20 @@ class Game:
             elif pac.ability_cd == 0:
                 self.target_moves[pac] = Speed(pac.id)
             else:
-                best_node = self.board.best_path(pac.position, (pac.speed_turns_left > 0) + 2)
+                previous_path = self.board.astar_search(self.board.grid[pac.position], self.board.grid[self.previous_positions[pac]])
+                best_node = self.board.best_path(
+                    pac.position,
+                    (pac.speed_turns_left > 0) + 3,
+                    previous_path
+                )
                 error(f"best node chosen = {best_node}")
-                if best_node.total_cost:
+                if best_node and best_node.total_cost:
                     node = best_node
                     while node.parent:
                         error(f"Deleting occupant of node {node}")
                         self.board.reset_occupant(node.tile.get_position())
                         node = node.parent
-                    self.target_moves[pac] = Move(pac.id, node.tile)
-                    self.board.reset_occupant(best_node.tile.get_position())
+                    self.target_moves[pac] = Move(pac.id, best_node.tile)
                 else:
                     position = self.get_random_position(pac)
                     self.target_moves[pac] = Move(pac.id, position)
@@ -471,13 +506,14 @@ class Game:
         self.my_pacs.clear()
         self.enemy_pacs.clear()
         self.target_moves.clear()
+        self.known_pellet.clear()
 
-    def enemy_in_sight(self, pac: Pac) -> Union[None, Pac]:
+    def enemy_in_sight(self, pac: Pacman) -> Union[None, Pacman]:
         for enemy_pac in self.enemy_pacs:
             if self.board.in_sight(pac, enemy_pac):
                 return enemy_pac
 
-    def is_stuck(self, pac):
+    def is_stuck(self, pac) -> bool:
         if self.previous_positions:
             error(f"Previous positions: {self.previous_positions[pac]}")
             error(f"Previous move: {self.previous_moves[pac].type}")
@@ -485,7 +521,7 @@ class Game:
         else:
             return False
 
-    def get_random_position(self, pac: Pac):
+    def get_random_position(self, pac: Pacman) -> Position:
         random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
         while self.board.grid[random_position].type == TileType.WALL \
                 and not self.optimal_dispatching(random_position, pac):
@@ -493,7 +529,7 @@ class Game:
         error(f"No pellet found, sending to a random position: {random_position}")
         return random_position
 
-    def optimal_dispatching(self, new_position: Position, pac: Pac):
+    def optimal_dispatching(self, new_position: Position, pac: Pacman) -> bool:
         width = self.board.width
         height = self.board.height
         my_copy_pacs = self.my_pacs.copy()
@@ -508,6 +544,20 @@ class Game:
         is_x_centered = width / 2 - 15 * (width / 100) <= avg_position.x <= width + 15 * (width / 100)
         is_y_centered = height / 2 - 15 * (height / 100) <= avg_position.y <= height + 15 * (height / 100)
         return is_x_centered and is_y_centered
+
+    def visible_pellets(self) -> Set[Position]:
+        set_visible_pellets = set()
+        for pac in self.my_pacs:
+            for unit_move in ADJACENCY:
+                current_position = pac.position + unit_move
+                current_tile = self.board.grid.get(current_position, Tile(0, 0, TileType.WALL))
+                while current_tile.type == TileType.FLOOR:
+                    error(f"Current position = {current_tile}")
+                    set_visible_pellets.add(current_position)
+                    current_position += unit_move
+                    current_tile = self.board.grid.get(current_position, Tile(0, 0, TileType.WALL))
+        error(f"Visible pellets = {set_visible_pellets}")
+        return set_visible_pellets
 
 
 class Bisous:
