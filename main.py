@@ -523,6 +523,7 @@ class Game:
                     node = best_node
                     while node.parent:
                         # error(f"Deleting occupant of node {node}")
+                        self.known_pellet.pop(node.tile.get_position(), None)
                         self.board.reset_occupant(node.tile.get_position())
                         node = node.parent
                     self.target_moves[pac] = Move(pac.id, best_node.tile)
@@ -571,11 +572,19 @@ class Game:
 
     def get_random_position(self, pac: Pacman) -> Position:
         random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
-        while self.board.grid[random_position].type == TileType.WALL \
-                and not self.optimal_dispatching(random_position, pac):
+        random_counter = 0
+        while not self._valid_random_position(random_position, pac) or random_counter < 500:
             random_position = Position(randrange(0, self.board.width), randrange(0, self.board.height))
+            random_counter += 1
         error(f"No pellet found, sending to a random position: {random_position}")
         return random_position
+
+    def _valid_random_position(self, position: Position, pac: Pacman) -> bool:
+        tile = self.board.grid[position]
+        valid = tile.type == TileType.FLOOR
+        valid &= self.optimal_dispatching(position, pac)
+        valid &= tile.value > 0
+        return valid
 
     def optimal_dispatching(self, new_position: Position, pac: Pacman) -> bool:
         width = self.board.width
