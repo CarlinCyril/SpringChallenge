@@ -1,6 +1,6 @@
 import sys
 from enum import Enum
-from random import randrange
+from random import randrange, choice
 from typing import Union, Dict, Set, Optional, List
 
 
@@ -25,6 +25,7 @@ class PacShape(Enum):
     ROCK = "ROCK"
     PAPER = "PAPER"
     SCISSORS = "SCISSORS"
+    DEAD = "DEAD"
 
 
 PAYOFF = {PacShape.ROCK: {PacShape.ROCK: 0, PacShape.PAPER: -1, PacShape.SCISSORS: 1},
@@ -630,6 +631,70 @@ class Game:
                 key=lambda pos: pos.manhattan_distance(pac.position)
             )
             return self.known_pellet[list_pellet_positions[0]]
+
+    def optimal_pathing(self):
+        copy_grid = None
+        start_tile = next(tile for tile in self.board.grid if tile.type == TileType.FLOOR)  # type: Tile
+        crossroad = []
+        start_node = Node(start_tile, None)
+        neighbors = list(start_tile.neighbors)
+        if len(neighbors) > 2:
+            crossroad.append(start_node)
+        current_node = start_node
+        current_tile = neighbors[0]
+        while current_tile != start_tile:
+            current_node.parent = Node(current_tile, None)
+            current_node = current_node.parent
+            if len(neighbors) > 2:
+                crossroad.append(start_node)
+
+
+class Gene:
+    def __init__(self, tile: Tile, next_gene: () = None):
+        self.position = tile.get_position()
+        self.neighbors = tile.neighbors
+        self.next_gene = next_gene
+
+
+class Chromosome:
+    def __init__(self, genes: List[Gene]):
+        self.genes = genes
+        self.score = 0
+
+    def swap_genes(self):
+        index1, index2 = randrange(0, len(self.genes)), randrange(0, len(self.genes))
+        self.genes[index1 - 1].next_gene, self.genes[index2 - 1].next_gene = self.genes[index2], self.genes[index1]
+        self.genes[index1], self.genes[index2] = self.genes[index2], self.genes[index1]
+
+    def mutate(self):
+        index_gene = randrange(0, len(self.genes))
+        selected_gene = self.genes[index_gene]
+        mutation = choice(selected_gene.neighbors)
+        self.genes[index_gene], self.genes[index_gene - 1].next_gene, mutation.next_gene \
+            = mutation, mutation, self.genes[index_gene + 1]
+
+    def gene_creation(self):
+        selected_gene = choice(self.genes)  # type: Gene
+        following_gene = selected_gene.next_gene  # type: Gene
+        new_gene = choice(selected_gene.neighbors.union(following_gene.neighbors))  # type: Gene
+        selected_gene.next_gene, new_gene.next_gene = new_gene, following_gene
+
+    def fitness(self):
+        pass
+
+
+class Population:
+    def __init__(self, list_chromosomes: List[Chromosome]):
+        self.chromosomes = list_chromosomes
+
+    def crossover(self):
+        pass
+
+    def run_genetic_algorithm(self):
+        pass
+
+    def evolve(self):
+        pass
 
 
 class Bisous:
