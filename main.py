@@ -1,6 +1,9 @@
 import sys
+from copy import deepcopy
 from enum import Enum
-from random import randrange, choice
+from itertools import product
+from math import ceil
+from random import randrange, choice, uniform, randint
 from typing import Union, Dict, Set, Optional, List
 
 
@@ -267,6 +270,70 @@ class Pellet(Item):
         return self.value < other.value
 
 
+def astar_search(start: Tile, end: Tile) -> Optional[List[Tile]]:
+    # Create lists for open nodes and closed nodes
+    nodes_to_visit = []  # type: List[Node]
+    visited_nodes = []  # type: List[Node]
+
+    # Create a start node and an goal node
+    start_node = Node(start, None)
+    goal_node = Node(end, None)
+
+    # Add the start node
+    nodes_to_visit.append(start_node)
+
+    # Loop until the open list is empty
+    while nodes_to_visit:
+
+        # Sort the open list to get the node with the lowest cost first
+        nodes_to_visit.sort()
+
+        # Get the node with the lowest cost
+        current_node = nodes_to_visit.pop(0)
+
+        # Add the current node to the closed list
+        visited_nodes.append(current_node)
+
+        # Check if we have reached the goal, return the path
+        if current_node == goal_node:
+            path = []
+            while current_node != start_node:
+                path.append(current_node.tile)
+                current_node = current_node.parent
+            # Return reversed path
+            return path.reverse()
+
+        # Get neighbors
+        neighbors = current_node.tile.neighbors
+
+        # Loop neighbors
+        for tile_neighbor in neighbors:
+
+            # Check if the node is a wall
+            if tile_neighbor.type == TileType.WALL:
+                continue
+
+            # Create a neighbor node
+            neighbor = Node(tile_neighbor, current_node)
+
+            # Check if the neighbor is in the closed list
+            if neighbor in visited_nodes:
+                continue
+
+            # Generate heuristics (Manhattan distance)
+            neighbor.start_distance = neighbor.tile.manhattan_distance(start)
+            neighbor.target_distance = neighbor.tile.manhattan_distance(end)
+            neighbor.total_cost = neighbor.start_distance + neighbor.target_distance
+
+            # Check if neighbor is in open list and if it has a lower f value
+            if neighbor not in visited_nodes:
+                # Everything is green, add neighbor to open list
+                nodes_to_visit.append(neighbor)
+
+    # Return None, no path is found
+    return None
+
+
 class Board:
     def __init__(self) -> None:
         self.width, self.height = [int(i) for i in input().split()]
@@ -319,70 +386,6 @@ class Board:
                 min_distance = distance_neighbor if distance_neighbor < min_distance else min_distance
 
         return 1 + min_distance
-
-    # A* search
-    def astar_search(self, start: Tile, end: Tile) -> Optional[List[Tile]]:
-        # Create lists for open nodes and closed nodes
-        nodes_to_visit = []  # type: List[Node]
-        visited_nodes = []  # type: List[Node]
-
-        # Create a start node and an goal node
-        start_node = Node(start, None)
-        goal_node = Node(end, None)
-
-        # Add the start node
-        nodes_to_visit.append(start_node)
-
-        # Loop until the open list is empty
-        while nodes_to_visit:
-
-            # Sort the open list to get the node with the lowest cost first
-            nodes_to_visit.sort()
-
-            # Get the node with the lowest cost
-            current_node = nodes_to_visit.pop(0)
-
-            # Add the current node to the closed list
-            visited_nodes.append(current_node)
-
-            # Check if we have reached the goal, return the path
-            if current_node == goal_node:
-                path = []
-                while current_node != start_node:
-                    path.append(current_node.tile)
-                    current_node = current_node.parent
-                # Return reversed path
-                return path.reverse()
-
-            # Get neighbors
-            neighbors = current_node.tile.neighbors
-
-            # Loop neighbors
-            for tile_neighbor in neighbors:
-
-                # Check if the node is a wall
-                if tile_neighbor.type == TileType.WALL:
-                    continue
-
-                # Create a neighbor node
-                neighbor = Node(tile_neighbor, current_node)
-
-                # Check if the neighbor is in the closed list
-                if neighbor in visited_nodes:
-                    continue
-
-                # Generate heuristics (Manhattan distance)
-                neighbor.start_distance = neighbor.tile.manhattan_distance(start)
-                neighbor.target_distance = neighbor.tile.manhattan_distance(end)
-                neighbor.total_cost = neighbor.start_distance + neighbor.target_distance
-
-                # Check if neighbor is in open list and if it has a lower f value
-                if neighbor not in visited_nodes:
-                    # Everything is green, add neighbor to open list
-                    nodes_to_visit.append(neighbor)
-
-        # Return None, no path is found
-        return None
 
     def best_path(self, start: Position, max_distance: int = 1, visited=None) -> Node:
         nodes_to_visit = list()  # type: List[Node]
@@ -511,7 +514,7 @@ class Game:
             elif pac.ability_cd == 0:
                 self.target_moves[pac] = Speed(pac.id)
             else:
-                previous_path = self.board.astar_search(
+                previous_path = astar_search(
                     self.board.grid[pac.position], self.board.grid[self.previous_positions[pac]]
                 )
                 best_node = self.board.best_path(
@@ -633,68 +636,156 @@ class Game:
             return self.known_pellet[list_pellet_positions[0]]
 
     def optimal_pathing(self):
-        copy_grid = None
-        start_tile = next(tile for tile in self.board.grid if tile.type == TileType.FLOOR)  # type: Tile
-        crossroad = []
-        start_node = Node(start_tile, None)
-        neighbors = list(start_tile.neighbors)
-        if len(neighbors) > 2:
-            crossroad.append(start_node)
-        current_node = start_node
-        current_tile = neighbors[0]
-        while current_tile != start_tile:
-            current_node.parent = Node(current_tile, None)
-            current_node = current_node.parent
-            if len(neighbors) > 2:
-                crossroad.append(start_node)
+        genetic_algo = Population(0.01, 100, 100, 0.2, self.board.grid)
+        best_chromosome = genetic_algo.run_genetic_algorithm()
+        return [self.board.grid[gene.position] for gene in best_chromosome.genes]
 
 
 class Gene:
     def __init__(self, tile: Tile, next_gene: () = None):
         self.position = tile.get_position()
         self.neighbors = tile.neighbors
-        self.next_gene = next_gene
+        self.next = next_gene
+
+    def __eq__(self, other):
+        return self.position == other.position
 
 
 class Chromosome:
     def __init__(self, genes: List[Gene]):
         self.genes = genes
         self.score = 0
+        self._init_genes()
 
     def swap_genes(self):
         index1, index2 = randrange(0, len(self.genes)), randrange(0, len(self.genes))
-        self.genes[index1 - 1].next_gene, self.genes[index2 - 1].next_gene = self.genes[index2], self.genes[index1]
+        self.genes[index1 - 1].next, self.genes[index2 - 1].next = self.genes[index2], self.genes[index1]
         self.genes[index1], self.genes[index2] = self.genes[index2], self.genes[index1]
 
     def mutate(self):
-        index_gene = randrange(0, len(self.genes))
-        selected_gene = self.genes[index_gene]
-        mutation = choice(selected_gene.neighbors)
-        self.genes[index_gene], self.genes[index_gene - 1].next_gene, mutation.next_gene \
-            = mutation, mutation, self.genes[index_gene + 1]
+        if randint(0, 1) == 0:
+            index_gene = randrange(0, len(self.genes))
+            selected_gene = self.genes[index_gene]
+            mutation = choice(selected_gene.neighbors)
+            self.genes[index_gene], self.genes[index_gene - 1].next, mutation.next_gene \
+                = mutation, mutation, self.genes[index_gene + 1]
+        else:
+            last_gene = self.genes[-1]
+            new_gene = choice(last_gene.neighbors)
+            last_gene.next = new_gene
 
     def gene_creation(self):
         selected_gene = choice(self.genes)  # type: Gene
-        following_gene = selected_gene.next_gene  # type: Gene
+        following_gene = selected_gene.next  # type: Gene
         new_gene = choice(selected_gene.neighbors.union(following_gene.neighbors))  # type: Gene
-        selected_gene.next_gene, new_gene.next_gene = new_gene, following_gene
+        selected_gene.next, new_gene.next = new_gene, following_gene
 
-    def fitness(self):
-        pass
+    def fitness(self, grid: Grid):
+        score, visited_tile = 0, set()
+        current_gene = self.genes[0]
+        visited_tile.add(grid[current_gene.position])
+        while current_gene.next:
+            next_gene = current_gene.next
+            visited_tile.add(next_gene)
+            if next_gene not in current_gene.neighbors:
+                score += 1
+        score += len(visited_tile.difference(grid.values()))
+        score += abs(len(self.genes) - len(grid))
+
+    def _init_genes(self):
+        assert len(self.genes) > 1
+        for i in range(len(self.genes) - 1):
+            self.genes[i].next = self.genes[i + 1]
 
 
 class Population:
-    def __init__(self, list_chromosomes: List[Chromosome]):
-        self.chromosomes = list_chromosomes
+    def __init__(self, mutation_rate: float, max_generation_number: int, pop_number: int, elitism_rate: float,
+                 grid: Grid) -> None:
+        self.grid = grid
+        self.mutation_rate = mutation_rate
+        self.elitism_rate = elitism_rate
+        self.max_generation_number = max_generation_number
+        self.population_number = pop_number
+        self.chromosomes = list()  # type: List[Chromosome]
+        self._init_population()
 
-    def crossover(self):
-        pass
+    def _init_population(self):
+        global HEIGHT
+        global WIDTH
+        random_points = list()
+        for _ in range(ceil(len(self.grid)/10)):
+            random_tile = self.grid[Position(randint(0, WIDTH - 1), randint(0, HEIGHT - 1))]  # type: Tile
+            while random_tile.type == TileType.FLOOR or random_tile in random_points:
+                random_tile = self.grid[Position(randint(0, WIDTH - 1), randint(0, HEIGHT - 1))]  # type: Tile
+            random_points.append(random_tile.get_position())
+        for _ in range(self.population_number):
+            path = list()
+            for i, j in zip(random_points, random_points[1:] + random_points[:1]):
+                path += astar_search(self.grid[i], self.grid[j])
+            new_genes = [Gene(tile) for tile in path]
+            self.chromosomes.append(Chromosome(new_genes))
 
-    def run_genetic_algorithm(self):
-        pass
+    def run_genetic_algorithm(self) -> Chromosome:
+        error(f"Chromosomes : {self.chromosomes}")
+        generation_number = 1
+        while generation_number < self.max_generation_number:
+            next_generation = self.evolution()
 
-    def evolve(self):
-        pass
+            self.chromosomes = next_generation
+            generation_number += 1
+
+        self.rank_chromosomes()
+        self.chromosomes.sort(key=lambda x: x.score)
+        return self.chromosomes[0]
+
+    def evolution(self):
+        next_generation = list()
+        fittest_chromosomes = self.selection_fittest()
+        next_generation += fittest_chromosomes
+        children = self.breeding(fittest_chromosomes)
+        next_generation += children
+        mutated_chromosomes = self.mutation(next_generation)
+        next_generation += mutated_chromosomes
+        return next_generation
+
+    def mutation(self, population: List[Chromosome]) -> List[Chromosome]:
+        mutated_population = list()
+        number_mutants_required = len(self.chromosomes) - len(population)
+        for chromosome in population:
+            mutate = uniform(0, 1)
+            if mutate <= self.mutation_rate and len(mutated_population) < number_mutants_required:
+                new_chromosome = deepcopy(chromosome)
+                new_chromosome.mutate()
+                mutated_population.append(new_chromosome)
+
+        return mutated_population
+
+    def rank_chromosomes(self) -> None:
+        for chromosome in self.chromosomes:
+            chromosome.fitness(self.grid)
+
+    def selection_fittest(self) -> List[Chromosome]:
+        self.rank_chromosomes()
+        self.chromosomes.sort(key=lambda x: x.score)
+        fittest_threshold = ceil(self.elitism_rate * len(self.chromosomes))
+        return self.chromosomes[:fittest_threshold]
+
+    @staticmethod
+    def breed(parent1: Chromosome, parent2: Chromosome) -> Chromosome:
+        child = Chromosome([])
+        for i, j in product(range(len(parent1.genes) - 1), range(len(parent2.genes))):
+            if parent1.genes[i] in parent2.genes[j].neighbors:
+                reorder_genes = parent1[:i + 1] + parent2[j:]
+                child.genes = reorder_genes
+                return child
+
+    def breeding(self, fittest_chromosomes: List[Chromosome]) -> List[Chromosome]:
+        assert len(fittest_chromosomes) > 1
+        children = list()
+        for i in range(len(fittest_chromosomes) - 1):
+            child = self.breed(fittest_chromosomes[i], fittest_chromosomes[i + 1])
+            children.append(child)
+        return children
 
 
 class Bisous:
@@ -705,5 +796,7 @@ game = Game()
 
 while True:
     game.update()
-    game.next_move()
-    game.print_actions()
+    best_path = game.optimal_pathing()
+    error(f"{best_path}")
+    # game.next_move()
+    # game.print_actions()
