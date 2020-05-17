@@ -3,6 +3,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import product
 from math import ceil
+from multiprocessing.pool import Pool
 from random import randrange, choice, uniform, randint
 from typing import Union, Dict, Set, Optional, List
 
@@ -13,6 +14,24 @@ HEIGHT = 0
 MOVE = "MOVE"
 SPEED = "SPEED"
 SWITCH = "SWITCH"
+
+grid_input = """###############################
+    #   # #   # #   # #   #    
+### # ### ### # # ### ### # ###
+    #     #   # #   #     #    
+### # ### # ### ### # ### # ###
+# #   #                 #   # #
+# # # # # ### ### ### # # # # #
+# #     # #   # #   # #     # #
+# # ##### # # # # # # ##### # #
+#         # #     # #         #
+# ### # # # ####### # # # ### #
+#   #   #             #   #   #
+### # ### ##### ##### ### # ###
+    #         # #         #    
+### # ### # # # # # # ### # ###
+      ### # #     # # ###      
+###############################"""
 
 
 def error(s: str):
@@ -664,6 +683,7 @@ class Chromosome:
         self.genes = genes
         self.score = 0
         self._init_genes()
+        # print(f"Last gene = {self.genes[-1].next}")
 
     def swap_genes(self):
         index1, index2 = randrange(0, len(self.genes)), randrange(0, len(self.genes))
@@ -673,14 +693,15 @@ class Chromosome:
     def mutate(self):
         i = randint(0, 2)
         if i == 0:
-            index_gene = randrange(0, len(self.genes))
+            index_gene = randrange(0, len(self.genes) - 1)
             selected_gene = self.genes[index_gene]
-            mutation = choice(selected_gene.neighbors)
+            mutation = Gene(choice(list(selected_gene.neighbors)))
             self.genes[index_gene], self.genes[index_gene - 1].next, mutation.next_gene \
                 = mutation, mutation, self.genes[index_gene + 1]
         elif i == 1:
             last_gene = self.genes[-1]
-            new_gene = choice(last_gene.neighbors)
+            random_neighbor = choice(list(last_gene.neighbors))  # type: Tile
+            new_gene = Gene(random_neighbor)
             last_gene.next = new_gene
         else:
             _ = self.genes.pop(-1)
@@ -692,21 +713,26 @@ class Chromosome:
         selected_gene.next, new_gene.next = new_gene, following_gene
 
     def fitness(self, grid: Grid):
-        score, visited_tile = 0, set()
+        self._init_genes()
+        self.score, visited_tile = 0, set()
         current_gene = self.genes[0]
         visited_tile.add(grid[current_gene.position])
         while current_gene.next:
+            # print(f"Current gene = {current_gene}")
             next_gene = current_gene.next
-            visited_tile.add(next_gene)
-            if next_gene not in current_gene.neighbors:
-                score += 1
-        score += len(visited_tile.difference(grid.values()))
-        score += abs(len(self.genes) - len(grid))
+            if grid[next_gene.position] in visited_tile:
+                self.score += 1
+            visited_tile.add(grid[next_gene.position])
+            if grid[next_gene.position] not in current_gene.neighbors:
+                self.score += 10
+            current_gene = next_gene
+        self.score += len(visited_tile.difference(grid.values()))
+        self.score += abs(len(self.genes) - len(grid))
 
     def _init_genes(self):
-        assert len(self.genes) > 1
-        for i in range(len(self.genes) - 1):
-            self.genes[i].next = self.genes[i + 1]
+        if len(self.genes) > 1:
+            for ind in range(len(self.genes) - 1):
+                self.genes[ind].next = self.genes[ind + 1]
 
 
 class Population:
@@ -729,10 +755,15 @@ class Population:
             while random_tile.type == TileType.WALL or random_tile in random_points:
                 random_tile = self.grid[Position(randint(0, WIDTH - 1), randint(0, HEIGHT - 1))]  # type: Tile
             random_points.append(random_tile)
-        for point in random_points:
-            path = self._random_path(point)
-            new_genes = [Gene(tile) for tile in path]
-            self.chromosomes.append(Chromosome(new_genes))
+        pool = Pool(processes=4)
+        pool.map(self._generate_random_chromosome, random_points)
+        # for point in random_points:
+        #         #     self._generate_random_chromosome(point)
+
+    def _generate_random_chromosome(self, point):
+        path = self._random_path(point)
+        new_genes = [Gene(tile) for tile in path]
+        self.chromosomes.append(Chromosome(new_genes))
 
     @staticmethod
     def _random_path(start_tile: Tile):
@@ -752,6 +783,7 @@ class Population:
         # error(f"Chromosomes : {self.chromosomes}")
         generation_number = 1
         while generation_number < self.max_generation_number:
+            print(f"Generation number = {generation_number}")
             next_generation = self.evolution()
 
             self.chromosomes = next_generation
@@ -759,6 +791,8 @@ class Population:
 
         self.rank_chromosomes()
         self.chromosomes.sort(key=lambda x: x.score)
+        print(f"best score = {self.chromosomes[0].score}")
+        print(f"worst score = {self.chromosomes[-1].score}")
         return self.chromosomes[0]
 
     def evolution(self):
@@ -769,6 +803,12 @@ class Population:
         next_generation += children
         mutated_chromosomes = self.mutation(next_generation)
         next_generation += mutated_chromosomes
+        while len(next_generation) < self.population_number:
+            selected_gene = choice(self.chromosomes)  # type: Chromosome
+            mutate = uniform(0, 1)
+            if mutate <= self.mutation_rate:
+                selected_gene.mutate()
+            next_generation.append(selected_gene)
         return next_generation
 
     def mutation(self, population: List[Chromosome]) -> List[Chromosome]:
@@ -777,7 +817,8 @@ class Population:
         for chromosome in population:
             mutate = uniform(0, 1)
             if mutate <= self.mutation_rate and len(mutated_population) < number_mutants_required:
-                new_chromosome = deepcopy(chromosome)
+                copy_genes = [Gene(grid[gene.position], gene.next) for gene in chromosome.genes]
+                new_chromosome = Chromosome(copy_genes)
                 new_chromosome.mutate()
                 mutated_population.append(new_chromosome)
 
@@ -797,10 +838,13 @@ class Population:
     def breed(parent1: Chromosome, parent2: Chromosome) -> Chromosome:
         child = Chromosome([])
         for i, j in product(range(len(parent1.genes) - 1), range(len(parent2.genes))):
-            if parent1.genes[i] in parent2.genes[j].neighbors:
+            gene_1 = parent1.genes[i]
+            gene_2 = parent2.genes[j]
+            if gene_1 in gene_2.neighbors:
                 reorder_genes = parent1[:i + 1] + parent2[j:]
                 child.genes = reorder_genes
                 return child
+        return choice([parent1, parent2])
 
     def breeding(self, fittest_chromosomes: List[Chromosome]) -> List[Chromosome]:
         assert len(fittest_chromosomes) > 1
@@ -811,15 +855,24 @@ class Population:
         return children
 
 
-class Bisous:
-    pass
+line_grid = grid_input.split(sep='\n')
+grid = Grid()
+HEIGHT = len(line_grid)
+WIDTH = len(line_grid[0])
+for j in range(len(line_grid)):
+    for i in range(len(line_grid[j])):
+        grid[Position(i, j)] = Tile(i, j, TileType(line_grid[j][i]))
 
+for position, tile in grid.items():
+    for adjacent_position in ADJACENCY:
+        sentinel = grid.get(position + adjacent_position, Tile(0, 0, TileType.WALL))
+        if sentinel.type == TileType.FLOOR:
+            tile.neighbors.add(sentinel)
 
-game = Game()
+genetic_algo = Population(0.2, 40, 10, 0.2, grid)
+best_chromosome = genetic_algo.run_genetic_algorithm()
+print(f"best score = {best_chromosome.score}")
+best_path = [grid[gene.position] for gene in best_chromosome.genes]
+for tile in best_path:
+    print(tile.get_position())
 
-while True:
-    game.update()
-    best_path = game.optimal_pathing()
-    error(f"{best_path}")
-    # game.next_move()
-    # game.print_actions()
